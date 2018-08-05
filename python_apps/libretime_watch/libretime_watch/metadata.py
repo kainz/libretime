@@ -106,8 +106,9 @@ def analyse_file (filename,database):
    #logging.info (" mutagen: " +mime_mutagen )
    
    mime = MimeTypes()
-   type, a = mime.guess_type(filename)
-   logging.info ("mime_check :"+database["mime"]+ " mime: "+type)
+   mimetype, a = mime.guess_type(filename)
+
+   logging.info ("mime_check :"+database["mime"]+ " mime: "+str(mimetype))
    #+" mutagen: " +mime_mutagen )
    #
    database["ftype"] = "audioclip"
@@ -143,7 +144,11 @@ def analyse_file (filename,database):
          logging.debug('no album title for '+filename) 
          database["album_title"]= ""
        try:
-         database["track_number"]=audio['tracknumber'][0]
+         inp = audio['tracknumber'][0]
+         if '/' in inp:
+             inp = inp.split('/')[0]
+         inp = int(inp)
+         database["track_number"]=inp
        except StandardError, err:
          logging.debug('no track_number for '+filename) 
          database["track_number"]= 0
@@ -157,12 +162,12 @@ def analyse_file (filename,database):
          database["length"] = str(track_length) #time.strftime("%H:%M:%S.%f", track_length)
          # Other fields for Airtime
          database["cueout"] = database["length"]
-         database["replay_gain"]=float(replay_gain(filename))
+         #database["replay_gain"]=float(replay_gain(filename))
        database["cuein"]= "00:00:00.0"
        # get better (?) cuein, cueout using silan
-       database["cuein"], database["cueout"] = cue_points (filename, database["cuein"], database["cueout"])
+       #database["cuein"], database["cueout"] = cue_points (filename, database["cuein"], database["cueout"])
        # mark as silan checked
-       database["silan_check"] = "t"
+       #database["silan_check"] = "t"
        # use mutage to get better mime 
        if  f.mime:
             database["mime"] = f.mime[0]
@@ -176,7 +181,7 @@ def analyse_file (filename,database):
        analyse_ok=True
 
      except StandardError, err:
-          logging.error('Error ',str(err),filename) 
+          logging.error('Error %s in %s',str(err),filename) 
           #print "Error: ",str(err),filename
    return analyse_ok
 
