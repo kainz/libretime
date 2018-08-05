@@ -23,9 +23,10 @@ import metadata as airtime_md
 
 
 
-EXCHANGE="airtime-media-monitor"
+#EXCHANGE="airtime-media-monitor"
+EXCHANGE="airtime-analyzer"
 EXCHANGE_TYPE = "direct"
-ROUTING_KEY="filesystem"
+ROUTING_KEY="" #filesystem
 QUEUE="media-monitor"
 
 timestamp_file = "/var/tmp/airtime/media-monitor/last_index"
@@ -49,15 +50,13 @@ def update_database (conn):
    """
    cur = conn.cursor()
    cols = database.keys()
-   cols_str = str(cols)
-   #cut off enclosing []
-   cols_str = cols_str[1:-1]
-   cols_str = cols_str.replace("'","")
+   cols_str = ','.join([c for c in cols])
+   vals_bind_str = ','.join(['%s' for q in cols])
    vals = [database[x] for x in cols]
-   vals_str_list = ["%s"] * len(vals)
-   vals_str = ", ".join(vals_str_list)
-   cur.execute ("UPDATE cc_files set ({cols}) = ({vals_str}) where directory = {dir} and filepath ='{file}'"
-       .format( cols = cols_str, vals_str = vals_str, dir = database["directory"], file = database["filepath"] ), vals)
+   vals += [ database["directory"], database["filepath"] ]
+   q="UPDATE cc_files set ({cols}) = ({vals_bind_str}) where directory = %s and filepath = %s".format(cols = cols_str, vals_bind_str = vals_bind_str)
+   logging.debug("q: %s, vals: %s",q, vals)
+   cur.execute(q, vals)
    conn.commit()
    cur.close()
 
@@ -65,15 +64,12 @@ def update_database (conn):
 def insert_database (conn):
    cur = conn.cursor()
    cols = database.keys()
-   cols_str = str(cols)
-   #cut off enclosing []
-   cols_str = cols_str[1:-1]
-   cols_str = cols_str.replace("'","")
+   cols_str = ','.join([c for c in cols])
+   vals_bind_str = ','.join(['%s' for q in cols])
    vals = [database[x] for x in cols]
-   vals_str_list = ["%s"] * len(vals)
-   vals_str = ", ".join(vals_str_list)
-   cur.execute ("INSERT INTO cc_files ({cols}) VALUES ({vals_str})".format(
-           cols = cols_str, vals_str = vals_str), vals)
+   q="INSERT INTO cc_files ({cols}) VALUES ({vals_bind_str})".format( cols = cols_str, vals_bind_str = vals_bind_str)
+   logging.debug("q: %s, vals: %s",q, vals)
+   cur.execute(q, vals)
    conn.commit()
    cur.close()
 
@@ -144,11 +140,10 @@ def watch (dir_id, directory):
           cur = conn.cursor()
           #file already in database
           try:
-            cur.execute ("SELECT count(*) from cc_files where"
-                +" filepath = '"+database["filepath"]+"'" 
-                +" and directory = "+str(database["directory"]))
+            q = "SELECT count(*) from cc_files where filepath = %s and directory = %s"
+            cur.execute(q, (database["filepath"], database["directory"]))
           except: 
-            logging.warning ("I can't SELECT count(*) ... from cc_files")
+            logging.warning ("I can't SELECT count(*) ... from cc_files q: %s", q)
             print "I can't SELECT from cc_files"
           row = cur.fetchone()
           # is there already a record
@@ -214,8 +209,13 @@ def connect_to_messaging_server():
 def msg_received_callback (channel, method, properties,body):
   '''Message reader'''
   try:
+    logging.debug ("message: "+body)
     msg_dict = json.loads(body)
-    api_key         = msg_dict["api_key"]
+    fields = "event_type id directory".split()
+    for i in fields:
+        if i not in msg_dict:
+            raise ValueError("message validation failed on field %s" % i)
+    #api_key         = msg_dict["api_key"]
     #callback_url    = msg_dict["callback_url"]
 
     #audio_file_path = msg_dict["tmp_file_path"]
@@ -225,14 +225,15 @@ def msg_received_callback (channel, method, properties,body):
     #storage_backend = msg_dict["storage_backend"]
   except Exception as e:
     logging.error("No JSON received: "+body+ str(e))
-
-  if "rescan_watch" in msg_dict["cmd"]: 
-       # now call the watching routine 
-       logging.info ("Got message: "+msg_dict["cmd"]+" ID: "+str(msg_dict["id"])+" directory: "+msg_dict["directory"])
-       watch(str(msg_dict["id"]),msg_dict["directory"]) 
-  else :
-       logging.info ("Got unhandled message: "+body)
-  channel.basic_ack(delivery_tag = method.delivery_tag)
+  else:
+      if "rescan_watch" in msg_dict["event_type"]: 
+           # now call the watching routine 
+           logging.info ("Got message: "+msg_dict["event_type"]+"id: " + str(msg_dict["id"]) +" directory: "+msg_dict["directory"])
+           watch(str(msg_dict["id"]),msg_dict["directory"]) 
+      else :
+           logging.info ("Got unhandled message: "+body)
+  finally:
+      channel.basic_ack(delivery_tag = method.delivery_tag)
 
 def wait_for_messages(channel):
   """Waiting for messages comming from RabbitMQ
@@ -244,6 +245,7 @@ def disconnect_from_messaging_server(connection):
   connection.close()
 
 def main():
+  logging.basicConfig(level=logging.INFO)
   logging.info("Program started..")
   config = airtime.read_config()
 
